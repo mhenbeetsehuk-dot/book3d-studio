@@ -1,4 +1,4 @@
-# Book3D Studio v0.6.0
+# Book3D Studio v0.6.1
 
 Local, no-login Book → animated-video production prototype.
 
@@ -13,6 +13,6 @@ The built-in **LAST SIGNAL** demo renders six small scenes separately, generates
 
 ### Local requirements
 - Python 3.14 supported by included dependency range.
-- Blender 4.x/5.x.
+- Blender 5.x supported on current GPUs; Book3D also supports Blender 4.5 LTS / 3.6 LTS as compatibility fallbacks for older hardware.
 - FFmpeg available on PATH (or `BOOK3D_FFMPEG` set).
 - Windows PowerShell for offline TTS; if unavailable, the pipeline uses a tone fallback instead of failing.
