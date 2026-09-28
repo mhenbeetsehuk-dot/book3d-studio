@@ -68,13 +68,22 @@ def start_render(project: Project, project_folder: Path, scene_id: str, profile:
 
     def worker():
         expected_out=render_dir/f'{profile}.mp4'
-        attempts=[('workbench','BLENDER_WORKBENCH', 180 if profile=='fast' else (600 if profile=='quality' else 1800))]
-        if profile=='main':
-            attempts.append(('cycles_cpu','CYCLES',3600))
+        attempts=[
+            # First try Workbench on Vulkan. Blender 5.x can fail on older OpenGL
+            # drivers even when Vulkan is usable. --factory-startup avoids a saved
+            # user backend overriding this compatibility path.
+            ('workbench_vulkan','BLENDER_WORKBENCH','vulkan',180 if profile=='fast' else (600 if profile=='quality' else 1800)),
+            # CPU Cycles is slower but avoids Workbench/EEVEE shader paths. Use it
+            # as a fallback for quality as well as main renders.
+            ('cycles_cpu_vulkan','CYCLES','vulkan',420 if profile=='fast' else (1200 if profile=='quality' else 3600)),
+            # Final legacy attempt with Blender's default graphics backend. This can
+            # work on Blender 4.5/3.6 systems where Vulkan is unavailable.
+            ('cycles_cpu_default','CYCLES',None,420 if profile=='fast' else (1200 if profile=='quality' else 3600)),
+        ]
         last_rc=None
         combined_logs=[]
         try:
-            for label, forced_engine, timeout_s in attempts:
+            for label, forced_engine, gpu_backend, timeout_s in attempts:
                 for stale in (expected_out, Path(str(expected_out)+'.mp4')):
                     try:
                         if stale.exists(): stale.unlink()
@@ -86,11 +95,15 @@ def start_render(project: Project, project_folder: Path, scene_id: str, profile:
                     env['BOOK3D_RENDER_ENGINE']=forced_engine
                 else:
                     env.pop('BOOK3D_RENDER_ENGINE',None)
-                _write_status(render_dir,status='rendering',attempt=label,engine=forced_engine or 'auto')
+                _write_status(render_dir,status='rendering',attempt=label,engine=forced_engine or 'auto',gpu_backend=gpu_backend or 'default')
                 timed_out=False
                 try:
                     with log.open('w',encoding='utf-8',errors='replace') as f:
-                        proc=subprocess.run([blender,'--background','--python',str(script.resolve())],stdout=f,stderr=subprocess.STDOUT,timeout=timeout_s,env=env)
+                        cmd=[blender,'--factory-startup']
+                        if gpu_backend:
+                            cmd += ['--gpu-backend',gpu_backend]
+                        cmd += ['--background','--python',str(script.resolve())]
+                        proc=subprocess.run(cmd,stdout=f,stderr=subprocess.STDOUT,timeout=timeout_s,env=env)
                     last_rc=proc.returncode
                 except subprocess.TimeoutExpired:
                     timed_out=True
@@ -113,17 +126,22 @@ def start_render(project: Project, project_folder: Path, scene_id: str, profile:
                             actual.replace(expected_out)
                         except Exception:
                             final_out=actual
-                    _write_status(render_dir,status='complete',completed_at=time.time(),bytes=final_out.stat().st_size,video=str(final_out),attempt=label,engine=forced_engine or 'auto')
+                    _write_status(render_dir,status='complete',completed_at=time.time(),bytes=final_out.stat().st_size,video=str(final_out),attempt=label,engine=forced_engine or 'auto',gpu_backend=gpu_backend or 'default')
                     return
 
                 _write_status(render_dir,status='rendering',attempt=f'{label}_failed_retrying',returncode=last_rc,timeout=timed_out)
 
             tail='\n'.join(('\n'.join(combined_logs)).splitlines()[-120:])
-            if last_rc==0:
+            unsupported_gpu = ('GL_ARB_shader_draw_parameters' in tail or 'OpenGL implementation doesn\'t support' in tail or 'Out of resource error' in tail)
+            if unsupported_gpu:
+                err=('This Blender build cannot use the current graphics driver/hardware. '
+                     'Book3D tried Vulkan Workbench and CPU Cycles fallbacks. '
+                     'Install/update the manufacturer graphics driver; if the GPU is older, use Blender 4.5 LTS or 3.6 LTS and Book3D will detect it automatically.')
+            elif last_rc==0:
                 err='Blender completed successfully, but no MP4 was found after compatibility retries.'
             else:
                 err=f'Blender failed after automatic compatibility retries (last code {last_rc}).'
-            _write_status(render_dir,status='failed',error=err,log_tail=tail,returncode=last_rc)
+            _write_status(render_dir,status='failed',error=err,log_tail=tail,returncode=last_rc,unsupported_gpu=unsupported_gpu)
         except Exception as e:
             _write_status(render_dir,status='failed',error=str(e))
 
@@ -180,7 +198,7 @@ def run_system_test(root: Path):
     '''),encoding='utf-8')
     engines=[]
     try:
-        cp=subprocess.run([blender,'--background','--python',str(probe)],capture_output=True,text=True,timeout=45)
+        cp=subprocess.run([blender,'--factory-startup','--background','--python',str(probe)],capture_output=True,text=True,timeout=45)
         blob=(cp.stdout or '')+'\n'+(cp.stderr or '')
         payload=None
         for line in blob.splitlines():
@@ -221,18 +239,23 @@ def run_system_test(root: Path):
     tiny_ok=False
     if 'BLENDER_WORKBENCH' in engines:
         try:
-            cp=subprocess.run([blender,'--background','--python',str(tiny)],capture_output=True,text=True,timeout=120)
+            cp=subprocess.run([blender,'--factory-startup','--gpu-backend','vulkan','--background','--python',str(tiny)],capture_output=True,text=True,timeout=120)
             candidates=[out, Path(str(out)+'.mp4'), out.with_suffix('.mp4')]
             candidates += list(tmp.glob('*.mp4'))
             tiny_file=next((p for p in candidates if p.exists() and p.stat().st_size>0),None)
             tiny_ok=(cp.returncode==0 and tiny_file is not None)
-            add('Tiny MP4 render', tiny_ok, f"code={cp.returncode}; bytes={tiny_file.stat().st_size if tiny_file else 0}")
+            detail=(cp.stdout or '')+'\n'+(cp.stderr or '')
+            if tiny_ok:
+                add('Tiny MP4 render (Vulkan Workbench)', True, f"code={cp.returncode}; bytes={tiny_file.stat().st_size if tiny_file else 0}")
+            else:
+                gpu_old=('GL_ARB_shader_draw_parameters' in detail or 'OpenGL implementation doesn\'t support' in detail)
+                add('Tiny MP4 render (Vulkan Workbench)', False, ('Blender 5.x graphics requirement not met; Book3D will use CPU/legacy fallback.' if gpu_old else detail[-900:]))
         except subprocess.TimeoutExpired:
-            add('Tiny MP4 render', False, 'Timed out after 120 seconds')
+            add('Tiny MP4 render (Vulkan Workbench)', False, 'Timed out after 120 seconds')
         except Exception as e:
-            add('Tiny MP4 render', False, repr(e))
+            add('Tiny MP4 render (Vulkan Workbench)', False, repr(e))
     else:
-        add('Tiny MP4 render', False, 'Workbench unavailable')
+        add('Tiny MP4 render (Vulkan Workbench)', False, 'Workbench unavailable')
 
-    recommended='BLENDER_WORKBENCH' if tiny_ok else ('CYCLES' if 'CYCLES' in engines else (engines[0] if engines else None))
+    recommended='BLENDER_WORKBENCH/VULKAN' if tiny_ok else ('CYCLES/CPU' if 'CYCLES' in engines else (engines[0] if engines else None))
     return {'ok':all(c['ok'] for c in checks),'checks':checks,'recommended_engine':recommended}
