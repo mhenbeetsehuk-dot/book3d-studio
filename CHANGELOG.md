@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+- Added Vulkan-first Blender compatibility path for problematic OpenGL drivers.
+- Added CPU Cycles fallback for fast, quality, and main renders.
+- Detects Blender 5.x mandatory OpenGL extension failures such as GL_ARB_shader_draw_parameters.
+- System Test now tries Vulkan before declaring local rendering unavailable.
+- Added legacy Blender 4.5 LTS / 3.6 LTS fallback guidance for older GPUs.
+
+
 ## 0.6.0
 - Added built-in 30-second sci-fi acceptance film **LAST SIGNAL**.
 - Six independently rendered ~5-second scenes for low-resource PCs.
