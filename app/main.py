@@ -8,11 +8,12 @@ from .models import Project
 from .blender_export import blender_script
 from .blender_runtime import find_blender, start_render, status as render_status, prepare_scene, run_system_test
 from .short_film import create_demo_project, story_manifest, start_demo_movie, demo_status
+from .graphic_novel import create_graphic_demo_project, graphic_manifest, start_graphic_novel_movie, graphic_status, render_panel
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = ROOT / 'projects'; UPLOADS = ROOT / 'uploads'
 UPLOADS.mkdir(exist_ok=True); PROJECTS.mkdir(exist_ok=True)
-app = FastAPI(title='Book3D Studio', version='0.6.1')
+app = FastAPI(title='Book3D Studio', version='0.7.0')
 
 def safe_name(name: str) -> str: return re.sub(r'[^A-Za-z0-9._-]+','_',name)
 
@@ -28,13 +29,16 @@ def load_project(project_id:str):
 
 INDEX=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Book3D Studio</title>
 <style>body{font-family:system-ui;background:#0f1117;color:#f2f4f8;margin:0}.wrap{max-width:1100px;margin:auto;padding:24px}.hero{padding:26px;border:1px solid #303644;border-radius:18px;background:#171b24}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:#171b24;border:1px solid #303644;border-radius:14px;padding:16px;margin-top:16px}input,select,button{font:inherit;padding:11px;border-radius:10px;border:1px solid #3a4252;background:#10141c;color:#fff}button{cursor:pointer;background:#fff;color:#111;font-weight:700}.secondary{background:#202735;color:#fff}.muted{color:#aab3c2}.pill{display:inline-block;padding:4px 9px;border:1px solid #3a4252;border-radius:999px;margin:3px;font-size:12px}.scene{border-top:1px solid #303644;padding:12px 0}.bar{height:8px;background:#252b36;border-radius:99px;overflow:hidden}.fill{height:100%;width:0;background:#fff;transition:.3s}.good{color:#9be3aa}.warn{color:#ffd37a}.bad{color:#ff8e8e}a{color:white}.actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.renderbox{background:#10141c;border-radius:10px;padding:10px;margin-top:8px} @media(max-width:760px){.grid{grid-template-columns:1fr}}</style></head>
-<body><div class="wrap"><div class="hero"><h1>Book3D Studio <span style="font-size:13px;color:#aab3c2;font-weight:500">v0.6.1</span></h1><p class="muted">Book → story bible → scene direction → 3D preview → reusable production pipeline. Local. No login.</p><form id="f"><input type="file" name="file" accept=".txt,.docx,.pdf,.epub" required> <input name="title" placeholder="Project title (optional)"> <select name="style"><option>Cinematic 3D</option><option>Stylized 3D</option><option>Realistic 3D</option><option>Anime-inspired 3D</option></select> <button>Create Production Plan</button></form><div class="bar" style="margin-top:16px"><div id="fill" class="fill"></div></div><p id="status" class="muted"></p><p id="blender" class="muted">Checking Blender…</p><div class="actions"><button type="button" class="secondary" onclick="systemTest()">Run System Test</button><button type="button" onclick="createDemo()">Create 30s Sci-Fi Demo</button></div><div id="systemtest" class="renderbox muted" style="display:none"></div></div><div id="out"></div></div>
+<body><div class="wrap"><div class="hero"><h1>Book3D Studio <span style="font-size:13px;color:#aab3c2;font-weight:500">v0.7.0</span></h1><p class="muted">Book → story bible → scene direction → 3D preview → reusable production pipeline. Local. No login.</p><form id="f"><input type="file" name="file" accept=".txt,.docx,.pdf,.epub" required> <input name="title" placeholder="Project title (optional)"> <select name="style"><option>Cinematic 3D</option><option>Stylized 3D</option><option>Realistic 3D</option><option>Anime-inspired 3D</option></select> <button>Create Production Plan</button></form><div class="bar" style="margin-top:16px"><div id="fill" class="fill"></div></div><p id="status" class="muted"></p><p id="blender" class="muted">Checking Blender…</p><div class="actions"><button type="button" class="secondary" onclick="systemTest()">Run System Test</button><button type="button" onclick="createGraphicDemo()">Create 30s Graphic-Novel Demo</button><button type="button" class="secondary" onclick="createDemo()">Create 30s 3D Demo</button></div><div id="systemtest" class="renderbox muted" style="display:none"></div></div><div id="out"></div></div>
 <script>
 let current=null; const f=document.getElementById('f'),out=document.getElementById('out'),status=document.getElementById('status'),fill=document.getElementById('fill'),blender=document.getElementById('blender');
 (async()=>{let r=await fetch('/api/blender/status');let b=await r.json(); blender.innerHTML=b.detected?`<span class="good">Blender detected:</span> ${b.path}`:`<span class="warn">Blender not detected yet.</span> Production plans work now; install Blender 4.x or 5.x before rendering 3D previews.`})();
 f.onsubmit=async(e)=>{e.preventDefault();fill.style.width='35%';status.textContent='Reading manuscript and building story bible…';out.innerHTML='';let r=await fetch('/api/project',{method:'POST',body:new FormData(f)});if(!r.ok){status.textContent='Error: '+await r.text();fill.style.width='0';return}fill.style.width='100%';current=await r.json();status.textContent=`Created ${current.scenes.length} scenes, ${current.characters.length} character anchors, ${current.locations.length} location anchors.`;render(current)};
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-function render(p){let chars=p.characters.map(x=>`<span class="pill">${esc(x.name)}</span>`).join(''),locs=p.locations.map(x=>`<span class="pill">${esc(x.name)}</span>`).join('');let scenes=p.scenes.slice(0,50).map((s,i)=>`<div class="scene"><b>${esc(s.id)} · ${esc(s.chapter)} · ${esc(s.title)}</b><div class="muted">${esc(s.location)} · ${s.shots.length} shots</div><p>${esc(s.summary)}</p><div class="actions"><button class="secondary" onclick="prepare('${s.id}')">Build Blender scene</button>${i===0?`<button onclick="render3d('${s.id}','quality')">Quality Preview</button><button class="secondary" onclick="render3d('${s.id}','fast')">Fast Preview</button><button class="secondary" onclick="render3d('${s.id}','main')">Main Render</button>`:''}</div><div id="r_${s.id}" class="renderbox muted" style="display:none"></div>${s.shots.map(q=>`<div class="muted">Shot ${q.number}: ${esc(q.shot_type)}, ${esc(q.camera_move)}, ${q.duration_s}s — ${esc(q.action)}</div>`).join('')}</div>`).join('');out.innerHTML=`<div class="card"><h2>3D pipeline</h2><p class="muted">v0.6 adds the complete short-film acceptance pipeline: small scene renders, offline voice generation, original procedural music/SFX, and FFmpeg stitching. Quality Preview remains 720p/24fps; Main Render targets 1080p/24fps.</p></div><div class="grid"><div class="card"><h2>Characters</h2>${chars}</div><div class="card"><h2>Locations</h2>${locs}</div></div><div class="card"><h2>Production plan</h2><p><a href="/api/project/${p.id}/json">Project JSON</a> · <a href="/api/project/${p.id}/blender">Blender script</a></p>${scenes}</div>`}
+function render(p){let chars=p.characters.map(x=>`<span class="pill">${esc(x.name)}</span>`).join(''),locs=p.locations.map(x=>`<span class="pill">${esc(x.name)}</span>`).join('');let scenes=p.scenes.slice(0,50).map((s,i)=>`<div class="scene"><b>${esc(s.id)} · ${esc(s.chapter)} · ${esc(s.title)}</b><div class="muted">${esc(s.location)} · ${s.shots.length} shots</div><p>${esc(s.summary)}</p><div class="actions"><button class="secondary" onclick="prepare('${s.id}')">Build Blender scene</button>${i===0?`<button onclick="render3d('${s.id}','quality')">Quality Preview</button><button class="secondary" onclick="render3d('${s.id}','fast')">Fast Preview</button><button class="secondary" onclick="render3d('${s.id}','main')">Main Render</button>`:''}</div><div id="r_${s.id}" class="renderbox muted" style="display:none"></div>${s.shots.map(q=>`<div class="muted">Shot ${q.number}: ${esc(q.shot_type)}, ${esc(q.camera_move)}, ${q.duration_s}s — ${esc(q.action)}</div>`).join('')}</div>`).join('');out.innerHTML=`<div class="card"><h2>3D pipeline</h2><p class="muted">v0.7 adds a CPU-friendly Graphic Novel / Motion Comic pipeline alongside the 3D pipeline. Graphic-novel rendering does not require Blender or a modern GPU.</p></div><div class="grid"><div class="card"><h2>Characters</h2>${chars}</div><div class="card"><h2>Locations</h2>${locs}</div></div><div class="card"><h2>Production plan</h2><p><a href="/api/project/${p.id}/json">Project JSON</a> · <a href="/api/project/${p.id}/blender">Blender script</a></p>${scenes}</div>`}
+async function createGraphicDemo(){fill.style.width='40%';status.textContent='Creating LAST SIGNAL graphical-novel production plan…';out.innerHTML='';let r=await fetch('/api/graphic-demo/create',{method:'POST'});let j=await r.json();if(!r.ok){status.textContent='Graphic demo error: '+(j.detail||JSON.stringify(j));return}current=j.project;fill.style.width='100%';status.textContent='LAST SIGNAL Graphic Novel ready: six illustrated scenes, voices, music and SFX.';render(current);let card=document.createElement('div');card.className='card';card.innerHTML=\`<h2>Graphic Novel / Motion Comic</h2><p><b>LAST SIGNAL</b> will be drawn as six original illustrated panels and animated with lightweight camera motion. This path does not require Blender or a modern GPU.</p><div class="actions"><button onclick="renderGraphicMovie('quality')">Render Full 30s Quality Motion Comic</button><button class="secondary" onclick="renderGraphicMovie('fast')">Render Fast Test</button><a href="/api/graphic-demo/\${current.id}/manifest">Panel Manifest</a></div><div id="graphicMovieStatus" class="renderbox muted"></div>\`;out.prepend(card)}
+async function renderGraphicMovie(profile='quality'){let box=document.getElementById('graphicMovieStatus');box.textContent='Starting panel illustration and motion-comic assembly…';let r=await fetch(\`/api/graphic-demo/\${current.id}/render?profile=\${encodeURIComponent(profile)}\`,{method:'POST'});let j=await r.json();if(!r.ok){box.innerHTML='<span class="bad">'+esc(j.detail||JSON.stringify(j))+'</span>';return}let t=setInterval(async()=>{let q=await fetch(\`/api/graphic-demo/\${current.id}/status\`),x=await q.json();box.textContent=\`\${x.status}: \${x.step||''} (\${x.progress||0}%)\`;if(x.status==='complete'){clearInterval(t);box.innerHTML=\`<span class="good">Motion comic complete.</span> <a href="/api/graphic-demo/\${current.id}/video?profile=\${encodeURIComponent(profile)}">Open final 30s MP4</a>\`}else if(x.status==='failed'){clearInterval(t);box.innerHTML='<span class="bad">'+esc(x.error||'Graphic-novel pipeline failed')+'</span>'}},1500)}
+
 async function createDemo(){fill.style.width='40%';status.textContent='Creating LAST SIGNAL — six 5-second scenes…';out.innerHTML='';let r=await fetch('/api/demo/create',{method:'POST'});let j=await r.json();if(!r.ok){status.textContent='Demo error: '+(j.detail||JSON.stringify(j));return}current=j.project;fill.style.width='100%';status.textContent='LAST SIGNAL ready: 6 scenes, 30 seconds, voices/music/SFX plan included.';render(current);let card=document.createElement('div');card.className='card';card.innerHTML=`<h2>30-second movie test</h2><p><b>LAST SIGNAL</b> is six separate ~5-second renders, then local voice/music/SFX mixing and final stitching.</p><div class="actions"><button onclick="renderDemoMovie('quality')">Render Full 30s Quality Movie</button><button class="secondary" onclick="renderDemoMovie('fast')">Render Full 30s Fast Test</button><a href="/api/demo/${current.id}/manifest">Story/Audio Manifest</a></div><div id="demoMovieStatus" class="renderbox muted"></div>`;out.prepend(card)}
 async function renderDemoMovie(profile='quality'){let box=document.getElementById('demoMovieStatus');box.textContent='Starting complete movie pipeline…';let r=await fetch(`/api/demo/${current.id}/render?profile=${encodeURIComponent(profile)}`,{method:'POST'});let j=await r.json();if(!r.ok){box.innerHTML='<span class="bad">'+esc(j.detail||JSON.stringify(j))+'</span>';return}let t=setInterval(async()=>{let q=await fetch(`/api/demo/${current.id}/status`),s=await q.json();box.textContent=`${s.status}: ${s.step||''} (${s.progress||0}%)`;if(s.status==='complete'){clearInterval(t);box.innerHTML=`<span class="good">30-second movie complete.</span> <a href="/api/demo/${current.id}/video">Open LAST SIGNAL MP4</a>`}else if(s.status==='failed'){clearInterval(t);box.innerHTML='<span class="bad">'+esc(s.error||'Demo pipeline failed')+'</span>'}},2000)}
 async function systemTest(){let box=document.getElementById('systemtest');box.style.display='block';box.textContent='Running Python/Blender/video/tiny-render diagnostics…';let r=await fetch('/api/system-test',{method:'POST'});let j=await r.json();let rows=(j.checks||[]).map(x=>`<div><b class="${x.ok?'good':'bad'}">${x.ok?'PASS':'FAIL'}</b> ${esc(x.name)}${x.detail?' — '+esc(x.detail):''}</div>`).join('');box.innerHTML=`<b>System test: ${j.ok?'PASS':'NEEDS ATTENTION'}</b><div style="margin-top:8px">${rows}</div>${j.recommended_engine?'<div style="margin-top:8px">Recommended renderer: <b>'+esc(j.recommended_engine)+'</b></div>':''}`}
@@ -132,5 +136,44 @@ def demo_movie_video(project_id:str):
     if not v.exists(): raise HTTPException(404,'Demo movie not rendered yet')
     return FileResponse(v,media_type='video/mp4',filename='LAST_SIGNAL_30s.mp4')
 
+
+@app.post('/api/graphic-demo/create')
+def graphic_demo_create():
+    p=create_graphic_demo_project(); save_project(p)
+    return {'ok':True,'project':p.model_dump(),'manifest':graphic_manifest(p)}
+
+@app.get('/api/graphic-demo/{project_id}/manifest')
+def graphic_demo_manifest(project_id:str):
+    p,folder=load_project(project_id)
+    return JSONResponse(graphic_manifest(p))
+
+@app.post('/api/graphic-demo/{project_id}/render')
+def graphic_demo_render(project_id:str,profile:str='quality'):
+    p,folder=load_project(project_id)
+    return JSONResponse(start_graphic_novel_movie(p,folder,profile))
+
+@app.get('/api/graphic-demo/{project_id}/status')
+def graphic_demo_status(project_id:str):
+    p,folder=load_project(project_id)
+    return JSONResponse(graphic_status(folder))
+
+@app.get('/api/graphic-demo/{project_id}/video')
+def graphic_demo_video(project_id:str,profile:str='quality'):
+    profile=profile if profile in ('fast','quality','main') else 'quality'
+    p,folder=load_project(project_id)
+    v=folder/'graphic_novel'/f'LAST_SIGNAL_graphic_novel_{profile}.mp4'
+    if not v.exists(): raise HTTPException(404,'Graphic-novel movie not rendered yet')
+    return FileResponse(v,media_type='video/mp4',filename=v.name)
+
+@app.get('/api/graphic-demo/{project_id}/panel/{scene_id}')
+def graphic_demo_panel(project_id:str,scene_id:str,profile:str='quality'):
+    profile=profile if profile in ('fast','quality','main') else 'quality'
+    p,folder=load_project(project_id)
+    scene=next((s for s in p.scenes if s.id==scene_id),None)
+    if not scene: raise HTTPException(404,'Scene not found')
+    path=folder/'graphic_novel'/f'{scene_id}_{profile}.png'
+    if not path.exists(): render_panel(scene,path,profile)
+    return FileResponse(path,media_type='image/png',filename=path.name)
+
 @app.get('/api/health')
-def health(): return {'ok':True,'version':'0.6.1','login':False,'blender':bool(find_blender())}
+def health(): return {'ok':True,'version':'0.7.0','login':False,'blender':bool(find_blender())}
