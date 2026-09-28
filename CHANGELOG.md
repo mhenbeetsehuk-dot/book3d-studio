@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0
+- Added primary Graphic Novel / Motion Comic production mode.
+- Added original local illustrated panel renderer using Pillow; no Blender/GPU required.
+- Added LAST SIGNAL six-panel visual style bible and consistent Mara Voss design.
+- Added panel prompts/manifest for future commercial AI image-provider adapters.
+- Added lightweight FFmpeg pan/zoom motion-comic animation.
+- Reused offline voice, original procedural music and SFX, and final MP4 assembly.
+- Added Fast 540p, Quality 720p and Main 1080p graphic-novel profiles.
+- Kept the experimental 3D path available as a secondary mode.
+
 ## 0.6.1
 - Added Vulkan-first Blender compatibility path for problematic OpenGL drivers.
 - Added CPU Cycles fallback for fast, quality, and main renders.
