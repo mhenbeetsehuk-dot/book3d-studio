@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+# Local project data / uploads / generated renders
+uploads/*
+!uploads/.gitkeep
+projects/*
+!projects/.gitkeep
+.env
+*.blend1
+renders/
